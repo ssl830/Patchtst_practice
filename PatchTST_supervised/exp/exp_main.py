@@ -189,6 +189,10 @@ class Exp_Main(Exp_Basic):
                                             epochs = self.args.train_epochs,
                                             max_lr = self.args.learning_rate)
 
+        # 建议在这里添加：初始化损失记录列表
+        train_loss_history = []
+        vali_loss_history = []
+
         for epoch in range(self.args.train_epochs):
             print('train_epoch: '+ str(self.args.train_epochs))
             iter_count = 0
@@ -266,6 +270,10 @@ class Exp_Main(Exp_Basic):
             vali_loss = self.vali(vali_data, vali_loader, criterion)
             test_loss = self.vali(test_data, test_loader, criterion)
 
+            # 建议在这里添加：记录当前 epoch 的损失值
+            train_loss_history.append(train_loss)
+            vali_loss_history.append(vali_loss)
+
             try:
                 vali_mae_denorm = self.calculate_denorm_mae(vali_data, vali_loader)
                 test_mae_denorm = self.calculate_denorm_mae(test_data, test_loader)
@@ -291,6 +299,22 @@ class Exp_Main(Exp_Basic):
 
         best_model_path = path + '/' + 'checkpoint.pth'
         self.model.load_state_dict(torch.load(best_model_path))
+
+        # 建议在这里添加：绘制并保存损失曲线图
+        plt.figure()
+        plt.plot(range(1, len(train_loss_history) + 1), train_loss_history, label='Train Loss')
+        plt.plot(range(1, len(vali_loss_history) + 1), vali_loss_history, label='Validation Loss')
+        plt.title('Model Loss vs. Epochs')
+        plt.xlabel('Epoch')
+        plt.ylabel('Loss (MSE)')
+        plt.legend()
+        plt.grid(True)
+        
+        # 将图片保存到检查点目录下
+        loss_curve_path = os.path.join(path, "loss_curve.pdf")
+        plt.savefig(loss_curve_path)
+        plt.close() # 释放内存
+        print(f"损失曲线图已保存至: {loss_curve_path}")
 
         return self.model
 
@@ -355,10 +379,21 @@ class Exp_Main(Exp_Basic):
                 inputx.append(batch_x.detach().cpu().numpy())
                 if i % 5 == 0:   # 每5个batch生成一张图
                     # 只处理每个batch的第一个样本 [0]
-                    input = batch_x.detach().cpu().numpy()
-                    gt = np.concatenate((input[0, :, -1], true[0, :, -1]), axis=0)
-                    pd = np.concatenate((input[0, :, -1], pred[0, :, -1]), axis=0)
-                    visual(gt, pd, os.path.join(folder_path, str(i) + '.pdf'))
+                    input_data = batch_x.detach().cpu().numpy()
+                    num_features = pred.shape[-1] # 获取特征数量
+
+                    # 遍历所有特征并为每个特征生成一张图
+                    for feature_idx in range(num_features):
+                        # 拼接历史输入和未来真实值
+                        gt = np.concatenate((input_data[0, :, feature_idx], true[0, :, feature_idx]), axis=0)
+                        # 拼接历史输入和未来预测值
+                        pd = np.concatenate((input_data[0, :, feature_idx], pred[0, :, feature_idx]), axis=0)
+                        
+                        # 为每个特征生成一个带清晰名称的PDF文件
+                        file_path = os.path.join(folder_path, f'feature_{feature_idx}_comparison.pdf')
+                        visual(gt, pd, file_path)
+                        print(f"已生成特征 {feature_idx} 的可视化图片: {file_path}")
+
 
         if self.args.test_flop:
             test_params_flop((batch_x.shape[1],batch_x.shape[2]))

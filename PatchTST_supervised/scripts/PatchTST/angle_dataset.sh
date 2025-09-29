@@ -17,8 +17,8 @@ target="z_angle_1"
 enc_in=3
 d_model=128
 d_ff=256
-e_layers=3
-n_heads=4
+e_layers=5
+n_heads=5
 dropout=0.1
 fc_dropout=0.1
 head_dropout=0.0
@@ -29,7 +29,7 @@ stride=8
 
 # 训练参数
 train_epochs=100
-patience=90
+patience=30
 batch_size=32
 learning_rate=0.0001
 random_seed=2021
