@@ -92,10 +92,77 @@ class Exp_Main(Exp_Basic):
 
                 loss = criterion(pred, true)
 
+
                 total_loss.append(loss)
         total_loss = np.average(total_loss)
         self.model.train()
         return total_loss
+
+    def calculate_denorm_mae(self, data_set, data_loader):
+        """计算反标准化后的MAE"""
+        total_mae_denorm = []
+        
+        self.model.eval()
+        with torch.no_grad():
+            for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(data_loader):
+                batch_x = batch_x.float().to(self.device)
+                batch_y = batch_y.float()
+
+                batch_x_mark = batch_x_mark.float().to(self.device)
+                batch_y_mark = batch_y_mark.float().to(self.device)
+
+                # decoder input
+                dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
+                dec_inp = torch.cat([batch_y[:, :self.args.label_len, :], dec_inp], dim=1).float().to(self.device)
+                
+                # 模型预测
+                if self.args.use_amp:
+                    with torch.cuda.amp.autocast():
+                        if 'Linear' in self.args.model or 'TST' in self.args.model:
+                            outputs = self.model(batch_x)
+                        else:
+                            if self.args.output_attention:
+                                outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)[0]
+                            else:
+                                outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+                else:
+                    if 'Linear' in self.args.model or 'TST' in self.args.model:
+                        outputs = self.model(batch_x)
+                    else:
+                        if self.args.output_attention:
+                            outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)[0]
+                        else:
+                            outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+                
+                f_dim = -1 if self.args.features == 'MS' else 0
+                outputs = outputs[:, -self.args.pred_len:, f_dim:]
+                batch_y = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
+
+                pred = outputs.detach().cpu().numpy()
+                true = batch_y.detach().cpu().numpy()
+
+                # 反标准化并计算MAE
+                try:
+                    if hasattr(data_set, 'inverse_transform'):
+                        # 反标准化预测结果和真实值
+                        pred_denorm = data_set.inverse_transform(pred)
+                        true_denorm = data_set.inverse_transform(true)
+                        
+                        # 计算反标准化后的MAE
+                        mae_denorm = np.mean(np.abs(pred_denorm - true_denorm))
+                        total_mae_denorm.append(mae_denorm)
+                    else:
+                        # 如果没有反标准化方法，使用原始数据计算MAE
+                        mae_original = np.mean(np.abs(pred - true))
+                        total_mae_denorm.append(mae_original)
+                except Exception as e:
+                    # 出错时使用原始数据的MAE
+                    mae_original = np.mean(np.abs(pred - true))
+                    total_mae_denorm.append(mae_original)
+
+        avg_mae_denorm = np.average(total_mae_denorm) if total_mae_denorm else 0.0
+        self.model.train()  # 恢复训练模式
+        return avg_mae_denorm
 
     def train(self, setting):
         train_data, train_loader = self._get_data(flag='train')
@@ -199,8 +266,18 @@ class Exp_Main(Exp_Basic):
             vali_loss = self.vali(vali_data, vali_loader, criterion)
             test_loss = self.vali(test_data, test_loader, criterion)
 
-            print("Epoch: {0}, Steps: {1} | Train Loss: {2:.7f} Vali Loss: {3:.7f} Test Loss: {4:.7f}".format(
-                epoch + 1, train_steps, train_loss, vali_loss, test_loss))
+            try:
+                vali_mae_denorm = self.calculate_denorm_mae(vali_data, vali_loader)
+                test_mae_denorm = self.calculate_denorm_mae(test_data, test_loader)
+                
+                print("Epoch: {0} | Train Loss: {1:.7f} Vali Loss: {2:.7f} Test Loss: {3:.7f}".format(
+                    epoch + 1, train_loss, vali_loss, test_loss))
+                print("反标准化 MAE - Vali: {0:.7f} Test: {1:.7f}".format(vali_mae_denorm, test_mae_denorm))
+            except:
+                print("Epoch: {0} | Train Loss: {1:.7f} Vali Loss: {2:.7f} Test Loss: {3:.7f}".format(
+                    epoch + 1, train_loss, vali_loss, test_loss))
+            
+            
             early_stopping(vali_loss, self.model, path)
             if early_stopping.early_stop:
                 print("Early stopping")
@@ -275,7 +352,8 @@ class Exp_Main(Exp_Basic):
                 preds.append(pred)
                 trues.append(true)
                 inputx.append(batch_x.detach().cpu().numpy())
-                if i % 20 == 0:
+                if i % 5 == 0:   # 每5个batch生成一张图
+                    # 只处理每个batch的第一个样本 [0]
                     input = batch_x.detach().cpu().numpy()
                     gt = np.concatenate((input[0, :, -1], true[0, :, -1]), axis=0)
                     pd = np.concatenate((input[0, :, -1], pred[0, :, -1]), axis=0)
@@ -298,13 +376,34 @@ class Exp_Main(Exp_Basic):
             os.makedirs(folder_path)
 
         mae, mse, rmse, mape, mspe, rse, corr = metric(preds, trues)
-        print('mse:{}, mae:{}, rse:{}'.format(mse, mae, rse))
-        f = open("result.txt", 'a')
-        f.write(setting + "  \n")
-        f.write('mse:{}, mae:{}, rse:{}'.format(mse, mae, rse))
-        f.write('\n')
-        f.write('\n')
-        f.close()
+        print('标准化后 - mse:{}, mae:{}, rse:{}'.format(mse, mae, rse))
+        # 🎯 新增：反标准化后的指标
+        try:
+            if hasattr(test_data, 'inverse_transform'):
+                preds_denorm = test_data.inverse_transform(preds)
+                trues_denorm = test_data.inverse_transform(trues)
+                
+                mae_denorm, mse_denorm, rmse_denorm, mape_denorm, mspe_denorm, rse_denorm, corr_denorm = metric(preds_denorm, trues_denorm)
+                print('反标准化后 - mse:{}, mae:{}, rse:{}'.format(mse_denorm, mae_denorm, rse_denorm))
+                
+                # 同时写入文件
+                f = open("result.txt", 'a')
+                f.write(setting + "  \n")
+                f.write('标准化后 - mse:{}, mae:{}, rse:{}\n'.format(mse, mae, rse))
+                f.write('反标准化后 - mse:{}, mae:{}, rse:{}\n'.format(mse_denorm, mae_denorm, rse_denorm))
+                f.write('\n')
+                f.close()
+            else:
+                print('数据集不支持反标准化')
+        except Exception as e:
+            print(f'反标准化计算失败: {e}')
+            # 保持原有的文件写入逻辑
+            f = open("result.txt", 'a')
+            f.write(setting + "  \n")
+            f.write('标准化后 - mse:{}, mae:{}, rse:{}'.format(mse, mae, rse))
+            f.write('\n')
+            f.write('\n')
+            f.close()
 
         # np.save(folder_path + 'metrics.npy', np.array([mae, mse, rmse, mape, mspe,rse, corr]))
         np.save(folder_path + 'pred.npy', preds)
