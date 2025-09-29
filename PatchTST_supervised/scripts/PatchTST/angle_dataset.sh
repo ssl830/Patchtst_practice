@@ -31,7 +31,7 @@ stride=8
 train_epochs=100
 patience=20
 batch_size=32
-learning_rate=0.0001
+learning_rate=0.00001
 random_seed=2021
 
 # 预测长度
