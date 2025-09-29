@@ -99,7 +99,7 @@ class Exp_Main(Exp_Basic):
         return total_loss
 
     def calculate_denorm_mae(self, data_set, data_loader):
-        """计算反标准化后的MAE，统计所有样本的绝对误差再整体平均"""
+        """计算反标准化后的MAE，统计所有样本的绝对误差再整体平均，修复三维数组问题"""
         all_pred_denorm = []
         all_true_denorm = []
 
@@ -115,7 +115,7 @@ class Exp_Main(Exp_Basic):
                 # decoder input
                 dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
                 dec_inp = torch.cat([batch_y[:, :self.args.label_len, :], dec_inp], dim=1).float().to(self.device)
-                
+
                 # 模型预测
                 if self.args.use_amp:
                     with torch.cuda.amp.autocast():
@@ -134,7 +134,7 @@ class Exp_Main(Exp_Basic):
                             outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)[0]
                         else:
                             outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
-                
+
                 f_dim = -1 if self.args.features == 'MS' else 0
                 outputs = outputs[:, -self.args.pred_len:, f_dim:]
                 batch_y = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
@@ -142,10 +142,13 @@ class Exp_Main(Exp_Basic):
                 pred = outputs.detach().cpu().numpy()
                 true = batch_y.detach().cpu().numpy()
 
-                # 反标准化
+                # 反标准化，保证输入为二维
                 if hasattr(data_set, 'inverse_transform'):
-                    pred_denorm = data_set.inverse_transform(pred)
-                    true_denorm = data_set.inverse_transform(true)
+                    orig_shape = pred.shape
+                    pred_2d = pred.reshape(-1, orig_shape[-1])
+                    true_2d = true.reshape(-1, orig_shape[-1])
+                    pred_denorm = data_set.inverse_transform(pred_2d).reshape(orig_shape)
+                    true_denorm = data_set.inverse_transform(true_2d).reshape(orig_shape)
                 else:
                     pred_denorm = pred
                     true_denorm = true
