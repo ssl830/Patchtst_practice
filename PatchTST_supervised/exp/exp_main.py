@@ -99,9 +99,10 @@ class Exp_Main(Exp_Basic):
         return total_loss
 
     def calculate_denorm_mae(self, data_set, data_loader):
-        """计算反标准化后的MAE"""
-        total_mae_denorm = []
-        
+        """计算反标准化后的MAE，统计所有样本的绝对误差再整体平均"""
+        all_pred_denorm = []
+        all_true_denorm = []
+
         self.model.eval()
         with torch.no_grad():
             for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(data_loader):
@@ -141,26 +142,21 @@ class Exp_Main(Exp_Basic):
                 pred = outputs.detach().cpu().numpy()
                 true = batch_y.detach().cpu().numpy()
 
-                # 反标准化并计算MAE
-                try:
-                    if hasattr(data_set, 'inverse_transform'):
-                        # 反标准化预测结果和真实值
-                        pred_denorm = data_set.inverse_transform(pred)
-                        true_denorm = data_set.inverse_transform(true)
-                        
-                        # 计算反标准化后的MAE
-                        mae_denorm = np.mean(np.abs(pred_denorm - true_denorm))
-                        total_mae_denorm.append(mae_denorm)
-                    else:
-                        # 如果没有反标准化方法，使用原始数据计算MAE
-                        mae_original = np.mean(np.abs(pred - true))
-                        total_mae_denorm.append(mae_original)
-                except Exception as e:
-                    # 出错时使用原始数据的MAE
-                    mae_original = np.mean(np.abs(pred - true))
-                    total_mae_denorm.append(mae_original)
+                # 反标准化
+                if hasattr(data_set, 'inverse_transform'):
+                    pred_denorm = data_set.inverse_transform(pred)
+                    true_denorm = data_set.inverse_transform(true)
+                else:
+                    pred_denorm = pred
+                    true_denorm = true
 
-        avg_mae_denorm = np.average(total_mae_denorm) if total_mae_denorm else 0.0
+                all_pred_denorm.append(pred_denorm)
+                all_true_denorm.append(true_denorm)
+
+        # 拼接所有batch，整体计算MAE
+        all_pred_denorm = np.concatenate(all_pred_denorm, axis=0)
+        all_true_denorm = np.concatenate(all_true_denorm, axis=0)
+        avg_mae_denorm = np.mean(np.abs(all_pred_denorm - all_true_denorm))
         self.model.train()  # 恢复训练模式
         return avg_mae_denorm
 
@@ -380,9 +376,11 @@ class Exp_Main(Exp_Basic):
         # 🎯 新增：反标准化后的指标
         try:
             if hasattr(test_data, 'inverse_transform'):
-                preds_denorm = test_data.inverse_transform(preds)
-                trues_denorm = test_data.inverse_transform(trues)
-                
+                shape = preds.shape
+                preds_2d = preds.reshape(-1, shape[-1])
+                trues_2d = trues.reshape(-1, shape[-1])
+                preds_denorm = test_data.inverse_transform(preds_2d).reshape(shape)
+                trues_denorm = test_data.inverse_transform(trues_2d).reshape(shape)
                 mae_denorm, mse_denorm, rmse_denorm, mape_denorm, mspe_denorm, rse_denorm, corr_denorm = metric(preds_denorm, trues_denorm)
                 print('反标准化后 - mse:{}, mae:{}, rse:{}'.format(mse_denorm, mae_denorm, rse_denorm))
                 
