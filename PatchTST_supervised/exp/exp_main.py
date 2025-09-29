@@ -190,6 +190,7 @@ class Exp_Main(Exp_Basic):
                                             max_lr = self.args.learning_rate)
 
         for epoch in range(self.args.train_epochs):
+            print('train_epoch: '+ self.args.train_epochs)
             iter_count = 0
             train_loss = []
 

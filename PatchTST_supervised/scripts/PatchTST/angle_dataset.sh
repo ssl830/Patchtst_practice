@@ -28,7 +28,7 @@ patch_len=16
 stride=8
 
 # 训练参数
-train_epochs=3
+train_epochs=100
 patience=20
 batch_size=32
 learning_rate=0.0001
