@@ -270,6 +270,7 @@ class Exp_Main(Exp_Basic):
                     epoch + 1, train_loss, vali_loss, test_loss))
                 print("反标准化 MAE - Vali: {0:.7f} Test: {1:.7f}".format(vali_mae_denorm, test_mae_denorm))
             except:
+                print("反标准化 MAE 计算错误")
                 print("Epoch: {0} | Train Loss: {1:.7f} Vali Loss: {2:.7f} Test Loss: {3:.7f}".format(
                     epoch + 1, train_loss, vali_loss, test_loss))
             
