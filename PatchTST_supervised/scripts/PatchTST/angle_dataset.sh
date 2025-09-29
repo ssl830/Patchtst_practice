@@ -29,7 +29,7 @@ stride=8
 
 # 训练参数
 train_epochs=100
-patience=20
+patience=90
 batch_size=32
 learning_rate=0.00001
 random_seed=2021
