@@ -9,6 +9,7 @@ import torch
 import torch.nn as nn
 from torch import optim
 from torch.optim import lr_scheduler 
+import pandas as pd
 
 import os
 import time
@@ -299,6 +300,14 @@ class Exp_Main(Exp_Basic):
 
         best_model_path = path + '/' + 'checkpoint.pth'
         self.model.load_state_dict(torch.load(best_model_path))
+
+        loss_df = pd.DataFrame({
+            'train_loss': train_loss_history,
+            'validation_loss': vali_loss_history
+        })
+        csv_path = os.path.join(path, "loss_history.csv")
+        loss_df.to_csv(csv_path, index=False)
+        print(f"损失历史已保存至: {csv_path}")
 
         # 建议在这里添加：绘制并保存损失曲线图
         plt.figure()
